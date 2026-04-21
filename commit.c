@@ -30,6 +30,9 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out);
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
+int tree_from_index(ObjectID *id_out);
+void hash_to_hex(const ObjectID *id, char *hex_out);
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // Parse raw commit data into a Commit struct.
 int commit_parse(const void *data, size_t len, Commit *commit_out) {
@@ -194,12 +197,21 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // simple commit: only message
-    char buffer[1024];
+    ObjectID tree_id;
 
-    snprintf(buffer, sizeof(buffer),
-             "message %s\n",
-             message);
+    // build tree from current index
+    if (tree_from_index(&tree_id) != 0) return -1;
 
-    return object_write(OBJ_COMMIT, buffer, strlen(buffer), commit_id_out);
+    char buffer[2048];
+
+    // convert tree hash to hex for readability
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(&tree_id, hex);
+
+    int len = snprintf(buffer, sizeof(buffer),
+                       "tree %s\n"
+                       "message %s\n",
+                       hex, message);
+
+    return object_write(OBJ_COMMIT, buffer, len, commit_id_out);
 }
