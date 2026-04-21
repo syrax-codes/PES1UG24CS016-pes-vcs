@@ -128,7 +128,10 @@ static int build_tree(IndexEntry *entries, int count, ObjectID *id_out) {
         }
         if (exists) continue;
 
-        IndexEntry sub[MAX_INDEX_ENTRIES];
+        
+        IndexEntry *sub = malloc(sizeof(IndexEntry) * count);
+        if (!sub) return -1;
+
         int sub_count = 0;
 
         for (int k = 0; k < count; k++) {
@@ -137,16 +140,20 @@ static int build_tree(IndexEntry *entries, int count, ObjectID *id_out) {
 
                 sub[sub_count] = entries[k];
 
-                memmove(sub[sub_count].path,
-                        entries[k].path + len + 1,
-                        strlen(entries[k].path) - len);
+                strcpy(sub[sub_count].path,
+                       entries[k].path + len + 1);
 
                 sub_count++;
             }
         }
 
         ObjectID sub_id;
-        if (build_tree(sub, sub_count, &sub_id) != 0) return -1;
+        if (build_tree(sub, sub_count, &sub_id) != 0) {
+            free(sub);
+            return -1;
+        }
+
+        free(sub);
 
         TreeEntry *te = &tree.entries[tree.count++];
         te->mode = MODE_DIR;
