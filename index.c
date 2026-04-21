@@ -136,20 +136,28 @@ int index_status(const Index *index) {
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
     FILE *f = fopen(".pes/index", "rb");
-    
+
     if (!f) {
         index->count = 0;
         return 0;
     }
 
-    fread(&index->count, sizeof(int), 1, f);
+    size_t r1 = fread(&index->count, sizeof(int), 1, f);
+    if (r1 != 1) {
+        fclose(f);
+        return -1;
+    }
 
     if (index->count > MAX_INDEX_ENTRIES) {
         fclose(f);
         return -1;
     }
 
-    fread(index->entries, sizeof(IndexEntry), index->count, f);
+    size_t r2 = fread(index->entries, sizeof(IndexEntry), index->count, f);
+    if (r2 != (size_t)index->count) {
+        fclose(f);
+        return -1;
+    }
 
     fclose(f);
     return 0;
