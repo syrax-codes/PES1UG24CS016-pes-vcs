@@ -1,5 +1,3 @@
-// object.c — Content-addressable object store
-
 #include "pes.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,8 +6,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <openssl/evp.h>
-
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 void hash_to_hex(const ObjectID *id, char *hex_out) {
     for (int i = 0; i < HASH_SIZE; i++) {
@@ -49,19 +45,13 @@ int object_exists(const ObjectID *id) {
     return access(path, F_OK) == 0;
 }
 
-// ─── IMPLEMENTATION ─────────────────────────────────────
-
-// Write object (partial: header + combine + hash only)
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-
-    // Step 1: Create header
     char header[64];
     const char *type_str = (type == OBJ_BLOB) ? "blob" :
                            (type == OBJ_TREE) ? "tree" : "commit";
 
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 2: Combine header + data
     size_t total_len = header_len + len;
     unsigned char *full = malloc(total_len);
     if (!full) return -1;
@@ -69,16 +59,124 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(full, header, header_len);
     memcpy(full + header_len, data, len);
 
-    // Step 3: Compute hash (correct method)
     compute_hash(full, total_len, id_out);
 
-    // STOP HERE (remaining steps not implemented yet)
+    if (object_exists(id_out)) {
+        free(full);
+        return 0;
+    }
+
+    char path[512];
+    object_path(id_out, path, sizeof(path));
+
+    char dir[512];
+    strcpy(dir, path);
+    char *slash = strrchr(dir, '/');
+    if (!slash) {
+        free(full);
+        return -1;
+    }
+    *slash = '\0';
+
+    mkdir(OBJECTS_DIR, 0755);
+    mkdir(dir, 0755);
+
+    char temp_path[520];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+
+    int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        free(full);
+        return -1;
+    }
+
+    ssize_t written = write(fd, full, total_len);
+    if (written != (ssize_t)total_len) {
+        close(fd);
+        free(full);
+        return -1;
+    }
+
+    fsync(fd);
+    close(fd);
+
+    if (rename(temp_path, path) != 0) {
+        free(full);
+        return -1;
+    }
+
+    int dir_fd = open(dir, O_RDONLY);
+    if (dir_fd >= 0) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+
     free(full);
     return 0;
 }
 
-// Read object (not implemented yet)
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    size_t file_size = ftell(f);
+    rewind(f);
+
+    unsigned char *buf = malloc(file_size);
+    if (!buf) {
+        fclose(f);
+        return -1;
+    }
+
+    size_t read_bytes = fread(buf, 1, file_size, f);
+    if (read_bytes != file_size) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+
+    fclose(f);
+
+    ObjectID computed;
+    compute_hash(buf, file_size, &computed);
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(buf);
+        return -1;
+    }
+
+    char *null_pos = memchr(buf, '\0', file_size);
+    if (!null_pos) {
+        free(buf);
+        return -1;
+    }
+
+    size_t header_len = null_pos - (char *)buf;
+
+    char type_str[10];
+    size_t size;
+    sscanf((char *)buf, "%s %zu", type_str, &size);
+
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
+    else {
+        free(buf);
+        return -1;
+    }
+
+    *len_out = size;
+    *data_out = malloc(size);
+    if (!*data_out) {
+        free(buf);
+        return -1;
+    }
+
+    memcpy(*data_out, buf + header_len + 1, size);
+
+    free(buf);
+    return 0;
 }
