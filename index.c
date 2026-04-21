@@ -23,9 +23,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include "tree.h"
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
-
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 // Find an index entry by path (linear scan).
 IndexEntry* index_find(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
@@ -203,8 +204,55 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+    // Step 1: read file
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    rewind(f);
+
+    void *data = malloc(size);
+    if (!data) {
+        fclose(f);
+        return -1;
+    }
+
+    size_t r = fread(data, 1, size, f);
+    if (r != size) {
+        fclose(f);
+        free(data);
+        return -1;
+    }
+
+    fclose(f);
+
+    // Step 2: write blob object
+    ObjectID id;
+    if (object_write(OBJ_BLOB, data, size, &id) != 0) {
+        free(data);
+        return -1;
+    }
+
+    free(data);
+
+    // Step 3: check if already exists
+    IndexEntry *existing = index_find(index, path);
+
+    if (existing) {
+        // update existing
+        existing->mode = get_file_mode(path);
+        memcpy(existing->hash.hash, id.hash, HASH_SIZE);
+    } else {
+        // add new entry
+        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+
+        IndexEntry *e = &index->entries[index->count++];
+        strcpy(e->path, path);
+        e->mode = get_file_mode(path);
+        memcpy(e->hash.hash, id.hash, HASH_SIZE);
+    }
+
+    // Step 4: save index
+    return index_save(index);
 }

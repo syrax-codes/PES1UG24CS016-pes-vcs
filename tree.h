@@ -11,6 +11,8 @@
 
 #define MAX_TREE_ENTRIES 1024
 
+uint32_t get_file_mode(const char *path);
+
 typedef struct {
     uint32_t mode;          // 100644 (regular), 100755 (executable), 040000 (directory)
     ObjectID hash;          // SHA-256 of the blob or subtree
