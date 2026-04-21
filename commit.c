@@ -196,22 +196,61 @@ int head_update(const ObjectID *new_commit) {
 //   - head_update       : moves the branch pointer to your new commit
 //
 // Returns 0 on success, -1 on error.
+#include <time.h>
+
 int commit_create(const char *message, ObjectID *commit_id_out) {
     ObjectID tree_id;
 
-    // build tree from current index
     if (tree_from_index(&tree_id) != 0) return -1;
 
-    char buffer[2048];
+    char tree_hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(&tree_id, tree_hex);
 
-    // convert tree hash to hex for readability
-    char hex[HASH_HEX_SIZE + 1];
-    hash_to_hex(&tree_id, hex);
+    // parent (read from HEAD if exists)
+    char parent_hex[HASH_HEX_SIZE + 1] = {0};
+    FILE *head = fopen(".pes/HEAD", "r");
+if (head) {
+    if (fgets(parent_hex, sizeof(parent_hex), head) == NULL) {
+        parent_hex[0] = '\0';
+    } else {
+        // remove newline if present
+        parent_hex[strcspn(parent_hex, "\n")] = '\0';
+    }
+    fclose(head);
+}
+    // timestamp
+    time_t now = time(NULL);
 
-    int len = snprintf(buffer, sizeof(buffer),
-                       "tree %s\n"
-                       "message %s\n",
-                       hex, message);
+    char buffer[4096];
 
-    return object_write(OBJ_COMMIT, buffer, len, commit_id_out);
+    int len;
+    if (strlen(parent_hex) > 0) {
+        len = snprintf(buffer, sizeof(buffer),
+            "tree %s\n"
+            "parent %s\n"
+            "time %ld\n"
+            "message %s\n",
+            tree_hex, parent_hex, now, message);
+    } else {
+        len = snprintf(buffer, sizeof(buffer),
+            "tree %s\n"
+            "time %ld\n"
+            "message %s\n",
+            tree_hex, now, message);
+    }
+
+    int rc = object_write(OBJ_COMMIT, buffer, len, commit_id_out);
+    if (rc != 0) return -1;
+
+    // update HEAD
+    char commit_hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(commit_id_out, commit_hex);
+
+    FILE *f = fopen(".pes/HEAD", "w");
+    if (f) {
+        fprintf(f, "%s", commit_hex);
+        fclose(f);
+    }
+
+    return 0;
 }
